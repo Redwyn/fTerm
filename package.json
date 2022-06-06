@@ -1,0 +1,30 @@
+{
+  "name": "wang",
+  "version": "1.0.0",
+  "description": "discord bot for ShortStallion's Discord server",
+  "scripts": {
+    "test": "selftest()"
+  },
+  "main": "index.js",
+  "keywords": [
+    "bot",
+    "discord",
+    "js",
+    "discordjs",
+    "statistics"
+  ],
+  "author": "ShortStallion",
+  "license": "ISC",
+  "dependencies": {
+    "better-sqlite3": "^7.4.1",
+    "colors": "^1.4.0",
+    "event-emitter": "^0.3.5",
+    "events": "^3.3.0",
+    "http": "^0.0.1-security",
+    "https": "^1.0.0",
+    "input-handler": "^1.0.2",
+    "nosqlite": "^0.3.1",
+    "querystring": "^0.2.1",
+    "ws": "^8.7.0"
+  }
+}
