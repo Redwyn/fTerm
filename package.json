@@ -7,14 +7,11 @@
   },
   "main": "index.js",
   "keywords": [
-    "bot",
-    "discord",
-    "js",
-    "discordjs",
-    "statistics"
+     'chat',
+     'flist'
   ],
-  "author": "ShortStallion",
-  "license": "ISC",
+  "author": "Redwyn",
+  "license": "MIT",
   "dependencies": {
     "better-sqlite3": "^7.4.1",
     "colors": "^1.4.0",
