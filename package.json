@@ -7,8 +7,8 @@
   },
   "main": "index.js",
   "keywords": [
-     'chat',
-     'flist'
+     "chat",
+     "flist"
   ],
   "author": "Redwyn",
   "license": "MIT",
