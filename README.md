@@ -8,3 +8,8 @@
  - Complete text editing capabilities on par with, or exceeding, the official client.
  - Ability to save ads and use them in any channel you like.
  - Magic
+
+### What works so far:
+ - Signing into the official server.
+ - Ability to join public channels.
+ - Ability to send and recieve public messages

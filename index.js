@@ -16,6 +16,7 @@ const fControl = require('./lib/fcontrol.js');
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+process.title = 'F-Term'
 
 const creds = {
 	'account': 'null',
@@ -28,8 +29,9 @@ class clientWrapper {
 	constructor () {
 		this.ui = new uiEngine();
 		this.instance = null;
+		this.active = false;
 		
-		this.printFile('motd.txt');
+		this.printFile('motd.txt', true);
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		// Event handling to couple UI and chat controller.
@@ -37,30 +39,69 @@ class clientWrapper {
 
 		this.ui.on('querySent', (query) => {
 			if(query.message[0] != '/') {
-				this.ui.log(query.message);
+				this.instance.sendMessage(query.message);
 			}
 
 			let commandRaw = query.message.slice(1);
 			let command = commandRaw.split(' ');
 
-			if(command[0] == 'login' && this.instance == null) {
-				this.instance = new fControl.fcontrol(fControl.API_ROOT, fControl.API_ENDPOINTS, creds, this.ui);
+			if(command[0] == 'test') {
+				this.ui.createPane('Sample');
+			}
+
+			if(command[0] == 'login' && this.instance == null) {				
+				this.run();
+			}
+
+			if(command[0] == 'listchannels' && !(this.instance == null)) {
+				let channels = this.instance.getChannels();
+				let channelNames = Object.keys(channels);
+
+				this.ui.log(this.ui.activePane, 'Here is a list of all public channels:', true)
+				
+				for(let c = 0; c < channelNames.length; c++) {
+					let channel = channels[channelNames[c]];
+					this.ui.log(this.ui.activePane, '\t' + channelNames[c] + ":" + channel.users);
+				}				
+			}
+
+			if(command[0] == 'join' && !(this.instance == null)) {
+				if(command[1] == 'pub') {
+					let channel = command.slice(2).join(' ');
+
+					this.instance.joinChannel(channel)
+				}
 			}
 		})
 		
 	}
 
-	printFile(path) {
+	printFile(path, forceRender = false) {
 		fs.readFile(path, 'utf8', (err, data) => {
 			let lines = data.toString().replace(/\r\n/g, '\n').split('\n');
 
 			for(let i = 0; i < lines.length; i++) {
-				this.ui.log(lines[i]);
+				this.ui.log(lines[i], forceRender);
 			}
 		});
 	}
 
-	
+	async run () {
+		this.instance = new fControl(undefined, undefined, creds, this.ui);
+		await this.instance.getTicket();
+		this.instance.connect('Kimiko Awakara');
+
+		this.instance.on('unknowncmd', (cmd) => {
+			
+		})
+
+		this.instance.on('channeljoined', (channel) => {
+			this.ui.log('console', 'Joining Channel: ' + channel.title);
+			this.ui.createPane(channel.id, channel.title);
+			this.ui.activePane = channel.id;
+			this.instance.activeChannel = channel.id;
+		})
+	}
 }
 
 let client = new clientWrapper();
