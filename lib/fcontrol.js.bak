@@ -1,0 +1,613 @@
+"use strict";
+
+/*
+I spent a whole day on this so it'd be appreciated if you left this comment in place.
+
+Essentially this is a (kind of?) simple web request handler. Send in your request and get a response back!
+
+Runs asynchronously so you'll have to figure out how to make it work synchronously if that's needed.
+
+*/
+
+const https = require('https');
+const http = require('http');
+const colors = require('colors');
+const querystring = require('querystring');
+const WebSocket = require('ws');
+const EventEmitter = require('events');
+
+
+async function pushRequest(path, method, body, queryonly = false) {
+	let specs = buildRequest(path, method, body);
+
+	// Using the port number, determine if we need to use http or https.
+	const requestor = (specs.options.port == 443) ? https.request : http.request;
+	
+	//if(specs.options.port == 80) {this.term.error('ERROR: Unable to make http requests.'); return;};
+
+	const request = new Promise((resolve, reject) => {
+		const req = requestor(specs.options, res => {
+			let response = {
+				status: res.statusCode,
+				dataRaw: [],
+				data: ''
+			}
+
+			res.on('data', d => {
+				response.dataRaw.push(d);
+			})
+
+			res.on('end', () => {
+				response.data = JSON.parse((Buffer.concat(response.dataRaw)).toString());
+
+				resolve(response);
+			})
+		});
+	
+		req.on('error', error => {
+			this.terminal.error(error);
+		});
+	
+		req.write(specs.body);
+		req.end();
+	});
+
+	try {
+		let bod = await request;
+		return bod;
+		//process.stdout.write(bod.data);
+	} catch (e) {
+		console.error(e);
+	}
+
+	//process.stdout.write(await request());
+}
+
+function buildRequest(path, method, body, verbose = false) {
+	let options = {
+		hostname: 'example.com',
+		port: 443,
+		path: '/',
+		method: method
+	}
+
+	let bodyReturn = null;
+
+	let cache = [];
+
+	cache = path.split(':');
+	options.port = (cache[0] == 'https') ? 443 : 80;
+
+	cache = (cache[1].slice(2).split('/'));
+	options.hostname = cache[0];
+	cache.shift();
+	options.path = '/' + cache.join('/') + '?' + querystring.stringify(body);
+
+	// Take the body of the requst and make it safe to send.
+	if(body != null) {
+		bodyReturn = '' + JSON.stringify(body);
+	
+		options.headers = {
+			'Content-Type': 'application/json',
+			'Content-Length': bodyReturn.length
+		}
+	}
+
+	if (verbose) console.log(bodyReturn);
+
+	return {"options":options, "body":bodyReturn};
+}
+
+
+const API_ROOT = 'https://www.f-list.net/';
+const API_ENDPOINTS = {
+	getApiTicket : "json/getApiTicket.php",
+	bookmark_add : 'json/api/bookmark-add.php',
+	bookmark_list : 'json/api/bookmark-list.php',
+	bookmark_remove : 'json/api/bookmark-list.php',
+	character_data : 'json/api/character-data.php',
+	character_list : 'json/api/character-list.php',
+	group_list : 'json/api/group-list.php',
+	ignore_list : 'json/api/ignore-list.php',
+	info_list : 'json/api/info-list.php',
+	kink_list : 'json/api/kink-list.php',
+	mapping_list : 'json/api/mapping-list.php',
+	friend_list : 'json/api/friend-list.php',
+	friend_remove : 'json/api/friend-remove.php',
+	request_accept : 'json/api/request-accept.php',
+	request_cancel : 'json/api/request-cancel.php',
+	request_deny : 'json/api/request-deny.php',
+	request_list : 'json/api/request-list.php',
+	request_pending : 'json/api/request-pending.php',
+	request_send : 'json/api/request-send.php',
+};
+
+class fcontrol extends EventEmitter {
+	constructor(ApiRoot, ApiEndpoints, credentials, term = console) {
+		super();
+
+		this.verboseConsole = false;
+
+		this.ApiRoot = ApiRoot || API_ROOT;
+		this.ApiEndpoints = ApiEndpoints || API_ENDPOINTS;
+		
+		this.creds = credentials;
+		
+		this.ticket = '';
+		this.socketPath = 'wss://chat.f-list.net/chat2';
+		this.socket = null;
+		this.term = term;
+
+		this.clientName = 'fTerm - Text-only FChat Client';
+		this.clientVer = '0.1 Dev';
+
+		this.callbacks = {};
+
+		this.character = '';
+		this.user = {
+			characters: [],
+			default_character: {},
+			ticket: '',
+			friends: [],
+			bookmarks: [],
+			error: ''
+		}
+
+		this.officialChannels = {};
+		this.channels = {};
+		this.activeChannel = 'console';
+
+		this.serverVars = {
+			chat_max: null,
+			priv_max: null,
+			lfrp_max: null,
+			lfrp_flood: null,
+			msg_flood: null,
+			permissions: null,
+			icon_blacklist: null
+		};
+
+		this.activeUsers = {};
+		this.chatOps = {};
+		this.friends = {};
+		this.bookmarks = {};
+		this.ignored = {};
+		
+		this.sessions = {};
+		this.term.log('Ready to authenticate...');
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	async getTicket() {
+		let giblet = await pushRequest(this.ApiRoot + this.ApiEndpoints.getApiTicket, 'POST', this.creds);
+
+		this.user.characters = JSON.stringify(giblet.data.characters);
+		this.user.default_character = JSON.stringify(giblet.data.default_character);
+		this.user.ticket = JSON.stringify(giblet.data.ticket);
+		this.user.friends = JSON.stringify(giblet.data.friends);
+		this.user.bookmarks = JSON.stringify(giblet.data.bookmarks);
+		this.user.error = JSON.stringify(giblet.data.error);
+
+		this.user = giblet.data;
+		this.term.log('Grabbed ticker!');
+		//this.term.log('' + JSON.stringify(Object.keys(this.user)));
+		return this.ticket;
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	sendCommand(identifier, payload) {
+		let suffix = (payload != undefined) ? (' ' + JSON.stringify(payload)) : '';
+
+		//this.term.log(this.activeChannel, identifier + suffix);
+		this.socket.send(identifier + suffix);
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	sendMessage(text) {
+		if(this.channels[this.activeChannel] != undefined)
+		{
+			let json = {
+				channel: this.activeChannel,
+				message: text
+			}
+		
+			this.sendCommand('MSG', json);
+			this.handleMSG(json);
+		}
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+	
+	buildCommand(identifier, payload) {
+		if(payload == undefined) return identifier;
+
+		return identifier + JSON.stringify(payload);
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+	// Start of socket command handlers.
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleADL(data) {
+		for(let o = 0; o < data.ops.length; o++) {
+			this.chatOps[data.ops[o]] = true;
+		}
+
+		this.term.log(data.ops.length + ' cat ops reported by the server.');
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleCDS(data) {
+		if(this.channels[data.channel] != undefined) {
+			this.channels[data.channel].description = data.description;
+		}
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleCHA(data) {
+	
+		for(let i = 0; i < data.channels.length; i++) {
+			let channel = data.channels[i];
+
+			this.officialChannels[channel.name] = {
+				mode : channel.mode,
+				users : channel.characters
+			}
+			
+			//this.term.log(JSON.stringify(data.channels[i]));
+		}
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleCOL(data) {
+		if(this.channels[data.channel] != undefined) {
+			this.channels[data.channel].ops = data.oplist;
+		}
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleCON(data) {
+		this.term.log('Server reports ' + data.count + ' users online.');
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleERR(data) {
+		this.term.log('ERROR:' + data.number + ': ' + data.message);
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleFLN(data) {
+		if(this.activeUsers[data.character] != undefined) {
+			delete this.activeUsers[data.character]
+
+			if(this.verboseConsole) this.term.log('User ' + data.character + 'has left.');;
+		}
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleFRL(data) {
+		this.term.log('Friends Online: ' + Object.keys(data))
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleHLO(data) {
+		this.term.log(data.message);
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleICH(data) {
+		if(this.channels[data.channel] != undefined) {
+			this.channels[data.channel].users = data.users;
+			this.channels[data.channel].mode = data.mode;
+		}
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleIDN(data) {
+		this.term.log('Successfully connected to server!');
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleIGN(data) {
+		if(data.action == 'init') {
+			this.ignored = {};
+			for(let i = 0; i < data.characters.length; i++) {
+				this.ignored[data.characters[i]] = true;
+			}
+		}
+
+		else if(data.action == 'add') {
+			this.ignored[data.character] = true;
+		}
+
+		else if(data.action == 'delete') {
+			delete this.ignored[data.character];
+		}
+
+		else {
+			this.term.log('Unknown IGN action: ' + data.action);
+		}
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleJCH(data) {
+		this.term.log(data.character.identity + ':' + this.character);
+		if(data.character.identity == this.character) {
+			this.channels[data.channel] = {
+				title: data.title,
+				ops: [],
+				users: [],
+				mode: null,
+				description: '',
+				messages: []
+			};
+
+			this.emit('channeljoined', {
+				id: data.channel,
+				title: data.title
+			});
+
+			//this.term.log('console', 'Joined channel ' + data.channel, true);
+
+			return;
+		}
+		
+		this.emit('JCH', {
+			channel: data.channel,
+			title: data.title,
+			character: data.character.identity
+		});
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleLIS(data) {
+		const characters = data.characters;
+		try{
+			for(let c = 0; c < characters.length; c++) {
+				let user = characters[c];
+				this.activeUsers[user[0]] = {};
+				this.activeUsers[user[0]].gender = user[1];
+				this.activeUsers[user[0]].status = user[2];
+				this.activeUsers[user[0]].statusText = user[3];
+	
+				//this.term.log('User signed in: ' + user[0]);
+			} 
+		}catch(err) {
+			this.term.log(colors.bgRed(JSON.stringify(data)));
+		}
+	}
+
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleLRP(data) {
+		this.term.log(data.channel, colors.bgGreen(data.character) + ': ' + data.message.replace(/\r\n/g, '\n').split('\n'));
+	}
+	
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleMSG(data) {
+		this.term.log(data.channel, colors.bgGreen(data.character) + ': ' + data.message.replace(/\r\n/g, '\n').split('\n'), true);
+	}
+	
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+	//////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleNLN(data) {
+		if(data.identity == undefined) return;
+	
+		this.activeUsers[data.identity] = {};
+		this.activeUsers[data.identity].gender = data.gender;
+		this.activeUsers[data.identity].status = data.status;
+		this.activeUsers[data.identity].statusText = '';
+
+		if (this.verboseConsole) this.term.log('User ' + data.identity + ' joined.')
+	}
+	
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleSTA(data) {
+		if(this.activeUsers[data.character] == undefined) return;
+
+		this.activeUsers[data.character].status = data.status;
+		this.activeUsers[data.character].statusText = data.statusmsg;
+
+		if (this.verboseConsole) this.term.log('User ' + data.character + ' has updated their status.');
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	handleVAR(data) {
+		this.serverVars[data.variable] = data.value;
+
+		this.term.log('Server reported ' + data.variable.toUpperCase() + ' at ' + data.value);
+	}
+	
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    // End of socket command handlers.
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+	
+	handleCommand(cmd) {
+		switch(cmd.id.toUpperCase()) {
+			case 'ADL':
+				this.handleADL(cmd.data);
+				break;
+			case 'CDS':
+				this.handleCDS(cmd.data);
+				break;
+			case 'CHA':
+				this.handleCHA(cmd.data);
+				break;
+			case 'COL':
+				this.handleCOL(cmd.data);
+				break;
+			case 'CON':
+				this.handleCON(cmd.data);
+				break;
+			case 'ERR':
+				this.handleERR(cmd.data);
+				break;
+			case 'FLN':
+				this.handleFLN(cmd.data);
+				break;
+			case 'FRL':
+				this.handleFRL(cmd.data);
+				break;
+			case 'IDN':
+				this.handleIDN(cmd.data);
+				break;
+			case 'HLO':
+				this.handleHLO(cmd.data);
+				break;
+			case 'ICH':
+				this.handleICH(cmd.data);
+				break;
+			case 'IGN':
+				this.handleIGN(cmd.data);
+				break;
+			case 'JCH':
+				this.handleJCH(cmd.data);
+				break;
+			case 'LIS':
+				this.handleLIS(cmd.data);
+				break;
+			case 'LRP':
+				this.handleLRP(cmd.data);
+				break;
+			case 'MSG':
+				this.handleMSG(cmd.data);
+				break;
+			case 'NLN':
+				this.handleNLN(cmd.data);
+				break;
+			case 'PIN':
+				this.sendCommand('PIN');
+				break;
+			case 'STA':
+				this.handleSTA(cmd.data);
+				break;
+			case 'VAR':
+				this.handleVAR(cmd.data);
+				break;
+			default:
+				this.term.log(colors.bgBlue('' + cmd.id + ': ' + (cmd.data)));
+				this.emit('unknowncmd', cmd.data);
+		}
+
+		if(this.callbacks[cmd] != undefined) {
+			this.callbacks[cmd]();
+
+			delete this.callbacks[cmd];
+		}
+	}
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    // Allows you to request a method be called when a specific command is recieved.
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	requestResponse(cmd, callback) {
+		if (this.callbacks[cmd] == undefined) {
+			this.callbacks[cmd] = callback;
+
+			return true;
+		}
+
+		return false;
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+	getChannels() {
+		this.sendCommand('CHA');
+
+		while(this.officialChannels == {})  {}
+		return this.officialChannels;
+				
+	}
+    
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    joinChannel(id) {
+    	this.sendCommand('JCH', {
+    		channel: id
+    	});
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+	
+	async connect () {
+
+		const characterName = arguments[0] || this.user.default_character;
+		
+		this.socket = new WebSocket(this.socketPath);
+
+		this.socket.on('open', () => {
+			this.term.log('Connected!');
+				
+			this.sessions[characterName] = {
+				activeChannels: {},
+				privMessages: {}
+			}
+
+			this.character = characterName;
+	
+				
+			this.sendCommand('IDN', {
+				method: 'ticket',
+				account: this.creds.account,
+				ticket: this.user.ticket,
+				character: characterName,
+				cname: this.clientName,
+				cversion: this.clientVer
+			});
+		});
+	
+		this.socket.on('message', (data) => {
+			let identifier = '' + data.slice(0, 3);
+			let json = JSON.parse((data.length > 3) ? data.slice(4) : '{}');
+
+			this.handleCommand({"id": identifier, "data": json});
+
+			//this.term.log('' + identifier + colors.blue(colors.bgWhite(data.length)));
+		})
+	}
+}
+
+module.exports = fcontrol;

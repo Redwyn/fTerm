@@ -18,7 +18,7 @@ const fControl = require('./lib/fcontrol.js');
 
 process.title = 'F-Term'
 
-const creds = {
+let creds = {
 	'account': 'null',
 	'password': 'void'
 }
@@ -49,7 +49,16 @@ class clientWrapper {
 				this.ui.createPane('Sample');
 			}
 
-			if(command[0] == 'login' && this.instance == null) {				
+			if(command[0] == 'login' && this.instance == null) {
+				if(command.length == 3) {
+					creds = {
+						'account' : command[1],
+						'password' : command[2]
+					}
+				}
+
+				this.ui.log(JSON.stringify(creds));
+							
 				this.run();
 			}
 
@@ -89,7 +98,10 @@ class clientWrapper {
 	async run () {
 		this.instance = new fControl(undefined, undefined, creds, this.ui);
 		await this.instance.getTicket();
-		this.instance.connect('Kimiko Awakara');
+
+		
+		
+		this.instance.connect();
 
 		this.instance.on('unknowncmd', (cmd) => {
 			
