@@ -31,7 +31,7 @@ class clientWrapper {
 		this.instance = null;
 		this.active = false;
 		
-		this.printFile('motd.txt', true);
+		this.printFile('./assets/motd.txt', true);
 
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 		// Event handling to couple UI and chat controller.
@@ -83,6 +83,9 @@ class clientWrapper {
 			}
 		})
 		
+		this.ui.on('tabChanged', (tabId) => {
+			this.instance.changeChannels(tabId);
+		});
 	}
 
 	printFile(path, forceRender = false) {
