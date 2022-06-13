@@ -13,3 +13,4 @@
  - Signing into the official server.
  - Ability to join public channels.
  - Ability to send and recieve public messages
+ - Ability to switch between channels using a mouse.
