@@ -1,9 +1,0 @@
-Welcome to F-Term!
-
-F-Term is a terminal-based F-Chat client that is meant to be easy to use.
-
-NOTE: This is a development build.
-
-To login please type /login [username] [password].
-
-Alternatively you can ommit your credentials to login using the last stored account.
