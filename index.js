@@ -3,7 +3,7 @@
 //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 const inputHandler = new (require('input-handler'))();
-const botdb = require('./lib/db.js');
+//const botdb = require('./lib/db.js');
 const cmdIndex = require('./commandIndex.js');
 const fs = require('fs');
 //const db = new botdb();
@@ -38,7 +38,7 @@ class clientWrapper {
 		//////////////////////////////////////////////////////////////////////////////////////////////////
 
 		this.ui.on('querySent', (query) => {
-			if(query.message[0] != '/') {
+			if(query.message[0] != '/' && this.instance != undefined) {
 				this.instance.sendMessage(query.message);
 			}
 
@@ -84,7 +84,7 @@ class clientWrapper {
 		})
 		
 		this.ui.on('tabChanged', (tabId) => {
-			this.instance.changeChannels(tabId);
+			if(this.instance != undefined) this.instance.changeChannels(tabId);
 		});
 	}
 
@@ -112,9 +112,9 @@ class clientWrapper {
 
 		this.instance.on('channeljoined', (channel) => {
 			this.ui.log('console', 'Joining Channel: ' + channel.title);
-			this.ui.createPane(channel.id, channel.title);
-			this.ui.activePane = channel.id;
-			this.instance.activeChannel = channel.id;
+			//this.ui.createPane(channel.id, channel.title, 'public');
+			//this.ui.activePane = channel.id;
+			//this.instance.activeChannel = channel.id;
 		})
 	}
 }
